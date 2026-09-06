@@ -178,7 +178,15 @@ public class UpdateHelper extends BaseRemoteHelper {
 
     public void checkNewVersionAvailable(Delegate delegate, boolean updateAlways_) {
         updateAlways = updateAlways_;
-        load(delegate);
+        xyz.deep.nagram.updater.GitHubUpdateChecker.checkForUpdates((update, error) -> {
+            if (update != null) {
+                if (delegate != null) {
+                    delegate.onTLResponse(update, null);
+                }
+            } else {
+                load(delegate);
+            }
+        });
     }
 
     public static class Update {

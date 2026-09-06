@@ -25,6 +25,18 @@ object NaConfig {
         ArrayList<ConfigItem>()
 
     // Configs
+    val enhancedCameraX =
+        addConfig(
+            "EnhancedCameraX",
+            ConfigItem.configTypeBool,
+            true
+        )
+    val frontScreenFlash =
+        addConfig(
+            "FrontScreenFlash",
+            ConfigItem.configTypeBool,
+            true
+        )
     val forceCopy =
         addConfig(
             "ForceCopy",

@@ -11,9 +11,12 @@ import java.util.concurrent.CountDownLatch;
 public class CameraSessionWrapper {
     public CameraSession camera1Session;
     public Camera2Session camera2Session;
+    public xyz.deep.nagram.camera.CameraXSession cameraXSession;
 
     public boolean isInitiated() {
-        if (camera2Session != null) {
+        if (cameraXSession != null) {
+            return cameraXSession.isInitiated();
+        } else if (camera2Session != null) {
             return camera2Session.isInitiated();
         } else if (camera1Session != null) {
             return camera1Session.isInitied();
@@ -23,7 +26,9 @@ public class CameraSessionWrapper {
     }
 
     public int getWorldAngle() {
-        if (camera2Session != null) {
+        if (cameraXSession != null) {
+            return cameraXSession.getWorldAngle();
+        } else if (camera2Session != null) {
             return camera2Session.getWorldAngle();
         } else if (camera1Session != null) {
             return camera1Session.getWorldAngle();
@@ -33,7 +38,9 @@ public class CameraSessionWrapper {
     }
 
     public int getCurrentOrientation() {
-        if (camera2Session != null) {
+        if (cameraXSession != null) {
+            return cameraXSession.getCurrentOrientation();
+        } else if (camera2Session != null) {
             return camera2Session.getCurrentOrientation();
         } else if (camera1Session != null) {
             return camera1Session.getCurrentOrientation();
@@ -43,7 +50,9 @@ public class CameraSessionWrapper {
     }
 
     public int getDisplayOrientation() {
-        if (camera2Session != null) {
+        if (cameraXSession != null) {
+            return cameraXSession.getDisplayOrientation();
+        } else if (camera2Session != null) {
             return camera2Session.getDisplayOrientation();
         } else if (camera1Session != null) {
             return camera1Session.getDisplayOrientation();
@@ -54,7 +63,9 @@ public class CameraSessionWrapper {
 
     @Deprecated
     public int getCameraId() {
-        if (camera2Session != null) {
+        if (cameraXSession != null) {
+            return cameraXSession.hashCode();
+        } else if (camera2Session != null) {
             return camera2Session.cameraId.hashCode();
         } else if (camera1Session != null) {
             return camera1Session.cameraInfo.cameraId;
@@ -81,7 +92,9 @@ public class CameraSessionWrapper {
 
 
     public void setCurrentFlashMode(String flashMode) {
-        if (camera2Session != null) {
+        if (cameraXSession != null) {
+            cameraXSession.setCurrentFlashMode(flashMode);
+        } else if (camera2Session != null) {
             // TODO
         } else if (camera1Session != null) {
             camera1Session.setCurrentFlashMode(flashMode);
@@ -89,7 +102,9 @@ public class CameraSessionWrapper {
     }
 
     public String getCurrentFlashMode() {
-        if (camera2Session != null) {
+        if (cameraXSession != null) {
+            return cameraXSession.getCurrentFlashMode();
+        } else if (camera2Session != null) {
             // TODO
             return Camera.Parameters.FLASH_MODE_OFF;
         } else if (camera1Session != null) {
@@ -99,7 +114,9 @@ public class CameraSessionWrapper {
     }
 
     public String getNextFlashMode() {
-        if (camera2Session != null) {
+        if (cameraXSession != null) {
+            return cameraXSession.getNextFlashMode();
+        } else if (camera2Session != null) {
             // TODO
             return Camera.Parameters.FLASH_MODE_OFF;
         } else if (camera1Session != null) {
@@ -109,7 +126,9 @@ public class CameraSessionWrapper {
     }
 
     public boolean hasFlashModes() {
-        if (camera2Session != null) {
+        if (cameraXSession != null) {
+            return cameraXSession.hasFlashModes();
+        } else if (camera2Session != null) {
             // TODO
             return false;
         } else if (camera1Session != null) {
@@ -144,7 +163,9 @@ public class CameraSessionWrapper {
     }
 
     public void setZoom(float zoom) {
-        if (camera2Session != null) {
+        if (cameraXSession != null) {
+            cameraXSession.setZoom(zoom);
+        } else if (camera2Session != null) {
             camera2Session.setZoom(AndroidUtilities.lerp(camera2Session.getMinZoom(), camera2Session.getMaxZoom(), zoom));
         } else if (camera1Session != null) {
             camera1Session.setZoom(zoom);
@@ -152,7 +173,9 @@ public class CameraSessionWrapper {
     }
 
     public void focusToRect(android.graphics.Rect focusRect, android.graphics.Rect meteringRect) {
-        if (camera2Session != null) {
+        if (cameraXSession != null) {
+            cameraXSession.focusToRect(focusRect, meteringRect);
+        } else if (camera2Session != null) {
             // TODO
         } else if (camera1Session != null) {
             camera1Session.focusToRect(focusRect, meteringRect);
@@ -160,7 +183,12 @@ public class CameraSessionWrapper {
     }
 
     public void destroy(boolean async, Runnable before, Runnable after) {
-        if (camera2Session != null) {
+        if (cameraXSession != null) {
+            if (before != null) {
+                before.run();
+            }
+            cameraXSession.destroy(async, before, after);
+        } else if (camera2Session != null) {
             if (before != null) {
                 before.run();
             }
@@ -171,7 +199,9 @@ public class CameraSessionWrapper {
     }
 
     public Object getObject() {
-        if (camera2Session != null) {
+        if (cameraXSession != null) {
+            return cameraXSession;
+        } else if (camera2Session != null) {
             return camera2Session;
         } else if (camera1Session != null) {
             return camera1Session;
@@ -191,15 +221,23 @@ public class CameraSessionWrapper {
         return wrapper;
     }
 
+    public static CameraSessionWrapper of(xyz.deep.nagram.camera.CameraXSession session) {
+        CameraSessionWrapper wrapper = new CameraSessionWrapper();
+        wrapper.cameraXSession = session;
+        return wrapper;
+    }
+
     @Override
     public boolean equals(@Nullable Object obj) {
         if (obj instanceof CameraSession) {
             return obj == camera1Session;
         } else if (obj instanceof Camera2Session) {
             return obj == camera2Session;
+        } else if (obj instanceof xyz.deep.nagram.camera.CameraXSession) {
+            return obj == cameraXSession;
         } else if (obj instanceof CameraSessionWrapper) {
             CameraSessionWrapper wrapper = (CameraSessionWrapper) obj;
-            return wrapper == this || wrapper.camera1Session == camera1Session && wrapper.camera2Session == camera2Session;
+            return wrapper == this || (wrapper.camera1Session == camera1Session && wrapper.camera2Session == camera2Session && wrapper.cameraXSession == cameraXSession);
         }
         return false;
     }

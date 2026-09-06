@@ -128,6 +128,7 @@ public class CameraView extends FrameLayout implements TextureView.SurfaceTextur
     private final boolean useCamera2 = false && SharedConfig.isUsingCamera2(UserConfig.selectedAccount);
     private final CameraSessionWrapper[] cameraSession = new CameraSessionWrapper[2];
     private CameraSessionWrapper cameraSessionRecording;
+    private xyz.deep.nagram.camera.CameraLensSwitcherWidget lensSwitcherWidget;
 
     private boolean useMaxPreview;
 
@@ -659,6 +660,9 @@ public class CameraView extends FrameLayout implements TextureView.SurfaceTextur
             cameraSession[0] = null;
         }
         isFrontface = !isFrontface;
+        if (lensSwitcherWidget != null) {
+            lensSwitcherWidget.setVisibility(!isFrontface ? View.VISIBLE : View.GONE);
+        }
     }
 
     public void resetCamera() {
@@ -2292,7 +2296,21 @@ public class CameraView extends FrameLayout implements TextureView.SurfaceTextur
                 FileLog.d("CameraView " + "create camera"+(useCamera2 ? "2" : "")+" session " + i);
             }
 
-            if (useCamera2) {
+            if (xyz.deep.nagram.camera.EnhancedCameraSettings.isEnhancedCameraEnabled() && !dual) {
+                xyz.deep.nagram.camera.CameraXSession session = xyz.deep.nagram.camera.CameraXSession.create(i == 0 ? isFrontface : !isFrontface, surfaceWidth, surfaceHeight);
+                cameraSession[i] = CameraSessionWrapper.of(session);
+                previewSize[i] = new Size(session.getPreviewWidth(), session.getPreviewHeight());
+                cameraThread.setCurrentSession(cameraSession[i], i);
+                if (lensSwitcherWidget == null && i == 0 && !isFrontface) {
+                    lensSwitcherWidget = xyz.deep.nagram.camera.CameraLensSwitcherWidget.attachTo(this);
+                }
+                if (lensSwitcherWidget != null) {
+                    lensSwitcherWidget.setCameraXSession(session);
+                }
+                session.open(surfaceTexture, () -> {
+                    requestLayout();
+                });
+            } else if (useCamera2) {
                 Camera2Session session = Camera2Session.create(i == 0 ? isFrontface : !isFrontface, surfaceWidth, surfaceHeight);
                 if (session == null) return;
                 cameraSession[i] = CameraSessionWrapper.of(session);

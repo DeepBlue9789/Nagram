@@ -85,6 +85,11 @@ public class NekoGeneralSettingsActivity extends BaseNekoXSettingsActivity {
     private final AbstractConfigCell hidePhoneRow = cellGroup.appendCell(new ConfigCellTextCheck(NekoConfig.hidePhone));
     private final AbstractConfigCell divider0 = cellGroup.appendCell(new ConfigCellDivider());
 
+    private final AbstractConfigCell headerCamera = cellGroup.appendCell(new ConfigCellHeader("Camera (Enhanced)"));
+    private final AbstractConfigCell enhancedCameraRow = cellGroup.appendCell(new ConfigCellTextCheck(NaConfig.INSTANCE.getEnhancedCameraX(), "High-resolution CameraX engine with multi-camera support"));
+    private final AbstractConfigCell frontScreenFlashRow = cellGroup.appendCell(new ConfigCellTextCheck(NaConfig.INSTANCE.getFrontScreenFlash(), "UI screen lighting flash for front camera"));
+    private final AbstractConfigCell dividerCamera = cellGroup.appendCell(new ConfigCellDivider());
+
     private final AbstractConfigCell headerTranslation = cellGroup.appendCell(new ConfigCellHeader(LocaleController.getString("Translate")));
     private final AbstractConfigCell translationProviderRow = cellGroup.appendCell(new ConfigCellCustom("TranslationProvider", CellGroup.ITEM_TYPE_TEXT_SETTINGS_CELL, true));
     private final AbstractConfigCell useTelegramTranslateInChatRow = cellGroup.appendCell(new ConfigCellTextCheck(NekoConfig.useTelegramTranslateInChat));

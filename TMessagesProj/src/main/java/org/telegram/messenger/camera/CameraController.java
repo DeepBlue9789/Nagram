@@ -484,6 +484,9 @@ public class CameraController implements MediaRecorder.OnInfoListener {
         } else if (sessionObject instanceof Camera2Session) {
             Camera2Session session = (Camera2Session) sessionObject;
             return session.takePicture(path, callback);
+        } else if (sessionObject instanceof xyz.deep.nagram.camera.CameraXSession) {
+            xyz.deep.nagram.camera.CameraXSession session = (xyz.deep.nagram.camera.CameraXSession) sessionObject;
+            return session.takePicture(path, callback);
         } else {
             return false;
         }

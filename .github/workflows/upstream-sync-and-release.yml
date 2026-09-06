@@ -1,0 +1,146 @@
+name: Upstream Sync & Release
+
+on:
+  schedule:
+    # Runs every 6 hours to check for upstream NextAlone/Nagram releases
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      force_sync:
+        description: 'Force sync and build even if tags match (true/false)'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: write
+
+jobs:
+  check-and-release:
+    name: Check Upstream & Build Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check for New Upstream Release
+        id: check_release
+        run: |
+          UPSTREAM_TAG=$(curl -s https://api.github.com/repos/NextAlone/Nagram/releases/latest | jq -r .tag_name)
+          MY_TAG=$(curl -s https://api.github.com/repos/DeepBlue9789/Nagram/releases/latest | jq -r .tag_name)
+
+          echo "Upstream latest release tag: $UPSTREAM_TAG"
+          echo "Current fork latest release tag: $MY_TAG"
+
+          if [ -z "$UPSTREAM_TAG" ] || [ "$UPSTREAM_TAG" = "null" ]; then
+            echo "Failed to fetch upstream release tag."
+            exit 1
+          fi
+
+          if [ "$UPSTREAM_TAG" != "$MY_TAG" ] || [ "${{ github.event.inputs.force_sync }}" = "true" ]; then
+            echo "should_release=true" >> $GITHUB_OUTPUT
+            echo "release_tag=$UPSTREAM_TAG" >> $GITHUB_OUTPUT
+          else
+            echo "Fork is up to date with upstream ($UPSTREAM_TAG). No build needed."
+            echo "should_release=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Configure Git Committer
+        if: steps.check_release.outputs.should_release == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Merge Upstream Release Tag
+        if: steps.check_release.outputs.should_release == 'true'
+        run: |
+          TAG="${{ steps.check_release.outputs.release_tag }}"
+          echo "Syncing with upstream tag: $TAG"
+          git remote add upstream https://github.com/NextAlone/Nagram.git || true
+          git fetch upstream --tags
+          # Merge upstream tag into main, giving precedence to our isolated camera additions
+          git merge -X ours "$TAG" -m "chore(sync): merge upstream release $TAG" || {
+            echo "Merge had conflicts; resolving with checkout of our files..."
+            git checkout --ours TMessagesProj/build.gradle
+            git checkout --ours TMessagesProj/src/main/java/org/telegram/messenger/BuildVars.java
+            git checkout --ours TMessagesProj/src/main/java/org/telegram/messenger/camera/CameraSessionWrapper.java
+            git checkout --ours TMessagesProj/src/main/java/org/telegram/messenger/camera/CameraController.java
+            git checkout --ours TMessagesProj/src/main/java/org/telegram/messenger/camera/CameraView.java
+            git add -A
+            git commit -m "chore(sync): resolve merge with upstream $TAG"
+          }
+
+      - name: Set up JDK 17
+        if: steps.check_release.outputs.should_release == 'true'
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK Tools
+        if: steps.check_release.outputs.should_release == 'true'
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK
+        if: steps.check_release.outputs.should_release == 'true'
+        run: |
+          echo "y" | sdkmanager --install "ndk;27.2.12479018" --sdk_root=${ANDROID_SDK_ROOT} &> /dev/null
+          echo "sdk.dir=${ANDROID_HOME}" > local.properties
+          echo "ndk.dir=${ANDROID_HOME}/ndk/27.2.12479018" >> local.properties
+
+      - name: Restore Permanent Keystore
+        if: steps.check_release.outputs.should_release == 'true'
+        run: |
+          if [ -n "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" ]; then
+            echo "Decoding RELEASE_KEYSTORE_BASE64 from repository secret..."
+            echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 --decode > TMessagesProj/release.keystore
+          else
+            echo "Using repository bundled keystore fallback..."
+            if [ -f "deep-nagram-release.jks" ]; then
+              cp deep-nagram-release.jks TMessagesProj/release.keystore
+            fi
+          fi
+
+      - name: Setup Gradle
+        if: steps.check_release.outputs.should_release == 'true'
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build Signed Release APK
+        if: steps.check_release.outputs.should_release == 'true'
+        run: |
+          export KEYSTORE_PASS="${{ secrets.KEYSTORE_PASSWORD }}"
+          export ALIAS_NAME="${{ secrets.KEY_ALIAS }}"
+          export ALIAS_PASS="${{ secrets.KEY_PASSWORD }}"
+          ./gradlew TMessagesProj:assembleRelease --no-daemon --build-cache
+
+      - name: Push Synced Main Branch
+        if: steps.check_release.outputs.should_release == 'true'
+        run: |
+          git push origin main --tags || true
+
+      - name: Publish GitHub Release
+        if: steps.check_release.outputs.should_release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.check_release.outputs.release_tag }}
+          name: "Deep Nagram ${{ steps.check_release.outputs.release_tag }}"
+          body: |
+            ## Deep Nagram Release ${{ steps.check_release.outputs.release_tag }}
+            
+            Synced with official [NextAlone/Nagram](https://github.com/NextAlone/Nagram/releases/tag/${{ steps.check_release.outputs.release_tag }}).
+            
+            ### Enhancements:
+            - **CameraX Engine**: Crisp, high-resolution photo capture with maximum sensor quality.
+            - **Multi-Camera Support**: Seamless switching between Ultrawide (0.5x), Wide (1x), and Telephoto (2x).
+            - **Front Camera Software Flash**: High-intensity UI screen illumination for bright low-light selfies.
+            - **Permanent Keystore**: Signed with permanent key for smooth future in-app updates.
+          files: |
+            TMessagesProj/build/outputs/apk/release/*.apk
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
