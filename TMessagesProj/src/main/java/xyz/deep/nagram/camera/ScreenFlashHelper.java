@@ -1,8 +1,6 @@
 package xyz.deep.nagram.camera;
 
 import android.app.Activity;
-import android.content.Context;
-import android.graphics.Color;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
@@ -10,18 +8,17 @@ import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
 
-import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.FileLog;
 
 /**
  * ScreenFlashHelper provides front-camera software flash via high-intensity UI screen illumination.
- * Temporarily overrides window brightness to 100% and displays a warm-white overlay to illuminate
- * selfies in low-light conditions.
+ * Temporarily overrides window brightness to 100% and displays a warm-white RingFlashOverlayView
+ * directly over the camera preview to illuminate selfies in low-light conditions.
  */
 public class ScreenFlashHelper {
 
     private static final Handler uiHandler = new Handler(Looper.getMainLooper());
-    private static View activeFlashOverlay = null;
+    private static RingFlashOverlayView activeFlashOverlay = null;
     private static float originalBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE;
 
     public interface FlashCallback {
@@ -29,39 +26,38 @@ public class ScreenFlashHelper {
     }
 
     /**
-     * Triggers screen flash illumination on the given activity window.
+     * Triggers screen flash illumination on the given parent container (e.g. CameraView) and activity window.
      */
-    public static void illuminateScreen(Activity activity, final FlashCallback callback) {
-        if (activity == null || activity.isFinishing()) {
-            if (callback != null) callback.onFlashReady();
-            return;
-        }
-
+    public static void illuminateScreen(ViewGroup cameraContainer, Activity activity, final FlashCallback callback) {
         uiHandler.post(() -> {
             try {
-                WindowManager.LayoutParams lp = activity.getWindow().getAttributes();
-                originalBrightness = lp.screenBrightness;
-                lp.screenBrightness = 1.0f; // Maximum screen brightness
-                activity.getWindow().setAttributes(lp);
+                if (activity != null && !activity.isFinishing()) {
+                    WindowManager.LayoutParams lp = activity.getWindow().getAttributes();
+                    originalBrightness = lp.screenBrightness;
+                    lp.screenBrightness = 1.0f; // Maximum screen brightness
+                    activity.getWindow().setAttributes(lp);
+                }
 
-                // Create or find full-screen white overlay
-                ViewGroup decorView = (ViewGroup) activity.getWindow().getDecorView();
-                if (activeFlashOverlay == null) {
-                    activeFlashOverlay = new View(activity);
-                    // Soft warm white for natural skin tone (#FFFDF5)
-                    activeFlashOverlay.setBackgroundColor(Color.argb(255, 255, 253, 245));
-                    activeFlashOverlay.setElevation(9999f);
-                    activeFlashOverlay.setClickable(false);
-                    activeFlashOverlay.setFocusable(false);
+                // Attach RingFlashOverlayView directly to cameraContainer (or activity decorView if container is null)
+                ViewGroup targetParent = cameraContainer;
+                if (targetParent == null && activity != null) {
+                    targetParent = (ViewGroup) activity.getWindow().getDecorView();
+                }
 
-                    FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT
-                    );
-                    decorView.addView(activeFlashOverlay, params);
-                } else {
-                    activeFlashOverlay.setVisibility(View.VISIBLE);
-                    activeFlashOverlay.bringToFront();
+                if (targetParent != null) {
+                    if (activeFlashOverlay == null) {
+                        activeFlashOverlay = new RingFlashOverlayView(targetParent.getContext());
+                        activeFlashOverlay.setElevation(9999f);
+
+                        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                ViewGroup.LayoutParams.MATCH_PARENT
+                        );
+                        targetParent.addView(activeFlashOverlay, params);
+                    } else {
+                        activeFlashOverlay.setVisibility(View.VISIBLE);
+                        activeFlashOverlay.bringToFront();
+                    }
                 }
 
                 // Wait 150ms for AE/AGC (auto-exposure) convergence before capturing
@@ -81,7 +77,6 @@ public class ScreenFlashHelper {
      * Dismisses the screen flash overlay and restores original display brightness.
      */
     public static void dismissScreen(Activity activity) {
-        if (activity == null) return;
         uiHandler.post(() -> {
             try {
                 if (activeFlashOverlay != null) {
@@ -92,9 +87,11 @@ public class ScreenFlashHelper {
                     activeFlashOverlay = null;
                 }
 
-                WindowManager.LayoutParams lp = activity.getWindow().getAttributes();
-                lp.screenBrightness = originalBrightness;
-                activity.getWindow().setAttributes(lp);
+                if (activity != null && !activity.isFinishing()) {
+                    WindowManager.LayoutParams lp = activity.getWindow().getAttributes();
+                    lp.screenBrightness = originalBrightness;
+                    activity.getWindow().setAttributes(lp);
+                }
             } catch (Exception e) {
                 FileLog.e("ScreenFlashHelper dismissScreen error", e);
             }

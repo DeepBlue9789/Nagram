@@ -222,6 +222,8 @@ public class ChatAttachAlertPhotoLayout extends ChatAttachAlert.AttachAlertLayou
     private boolean pressed;
     private boolean maybeStartDraging;
     private boolean dragging;
+    private Runnable lockCameraFocusRunnable;
+    private boolean isLongPressLockTriggered;
 
     private boolean cameraPhotoRecyclerViewIgnoreLayout;
 
@@ -2010,6 +2012,19 @@ public class ChatAttachAlertPhotoLayout extends ChatAttachAlert.AttachAlertLayou
                     maybeStartDraging = true;
                     lastY = event.getY();
                     zooming = false;
+                    isLongPressLockTriggered = false;
+                    if (cameraView != null && cameraOpened && !takingPhoto) {
+                        cameraView.getLocationOnScreen(viewPosition);
+                        final float downVX = event.getRawX() - viewPosition[0];
+                        final float downVY = event.getRawY() - viewPosition[1];
+                        lockCameraFocusRunnable = () -> {
+                            isLongPressLockTriggered = true;
+                            if (cameraView != null) {
+                                cameraView.lockFocusAndExposure((int) downVX, (int) downVY);
+                            }
+                        };
+                        AndroidUtilities.runOnUIThread(lockCameraFocusRunnable, 500);
+                    }
                 }
                 zoomWas = false;
                 pressed = true;
@@ -2046,8 +2061,16 @@ public class ChatAttachAlertPhotoLayout extends ChatAttachAlert.AttachAlertLayou
                         if (Math.abs(dy) > AndroidUtilities.getPixelsInCM(0.4f, false)) {
                             maybeStartDraging = false;
                             dragging = true;
+                            if (lockCameraFocusRunnable != null) {
+                                AndroidUtilities.cancelRunOnUIThread(lockCameraFocusRunnable);
+                                lockCameraFocusRunnable = null;
+                            }
                         }
                     } else if (dragging) {
+                        if (lockCameraFocusRunnable != null) {
+                            AndroidUtilities.cancelRunOnUIThread(lockCameraFocusRunnable);
+                            lockCameraFocusRunnable = null;
+                        }
                         if (cameraView != null) {
                             cameraView.setTranslationY(cameraView.getTranslationY() + dy);
                             lastY = newY;
@@ -2074,6 +2097,10 @@ public class ChatAttachAlertPhotoLayout extends ChatAttachAlert.AttachAlertLayou
                     }
                 }
             } else if (event.getActionMasked() == MotionEvent.ACTION_CANCEL || event.getActionMasked() == MotionEvent.ACTION_UP || event.getActionMasked() == MotionEvent.ACTION_POINTER_UP) {
+                if (lockCameraFocusRunnable != null) {
+                    AndroidUtilities.cancelRunOnUIThread(lockCameraFocusRunnable);
+                    lockCameraFocusRunnable = null;
+                }
                 pressed = false;
                 zooming = false;
                 if (zooming) {
@@ -2098,7 +2125,7 @@ public class ChatAttachAlertPhotoLayout extends ChatAttachAlert.AttachAlertLayou
                             cameraPanel.setTag(null);
                         }
                     }
-                } else if (cameraView != null && !zoomWas) {
+                } else if (cameraView != null && !zoomWas && !dragging && !isLongPressLockTriggered) {
                     cameraView.getLocationOnScreen(viewPosition);
                     float viewX = event.getRawX() - viewPosition[0];
                     float viewY = event.getRawY() - viewPosition[1];
@@ -2537,6 +2564,7 @@ public class ChatAttachAlertPhotoLayout extends ChatAttachAlert.AttachAlertLayou
             return;
         }
         cameraView.initTexture();
+        cameraView.setMiniMode(false);
         if (shouldLoadAllMedia()) {
             tooltipTextView.setVisibility(VISIBLE);
         } else {
@@ -2665,6 +2693,7 @@ public class ChatAttachAlertPhotoLayout extends ChatAttachAlert.AttachAlertLayou
         if (cameraView == null) {
             final boolean lazy = !LiteMode.isEnabled(LiteMode.FLAGS_CHAT);
             cameraView = new CameraViewInternal(getContext(), isCameraFrontfaceBeforeEnteringEditMode != null ? isCameraFrontfaceBeforeEnteringEditMode : parentAlert.openWithFrontFaceCamera, lazy);
+            cameraView.setMiniMode(!cameraOpened);
             //if (lazy) {
             //    cameraView.setThumbDrawable(cameraViewItemDecoration.placeholderDrawable);
             //}
@@ -2919,6 +2948,7 @@ public class ChatAttachAlertPhotoLayout extends ChatAttachAlert.AttachAlertLayou
         if (takingPhoto || cameraView == null) {
             return;
         }
+        cameraView.setMiniMode(true);
         animateCameraValues[1] = itemSize;
         animateCameraValues[2] = itemSize * 2 + dp(GAP);
         if (zoomControlHideRunnable != null) {

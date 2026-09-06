@@ -2,15 +2,15 @@ package xyz.deep.nagram.camera;
 
 import android.app.Activity;
 import android.content.Context;
-import android.graphics.Matrix;
 import android.graphics.Rect;
 import android.graphics.SurfaceTexture;
 import android.hardware.Camera;
-import android.os.Build;
+import android.util.Size;
 import android.view.Surface;
-import android.view.WindowManager;
+import android.view.ViewGroup;
 
 import androidx.annotation.NonNull;
+import androidx.camera.core.AspectRatio;
 import androidx.camera.core.CameraControl;
 import androidx.camera.core.CameraInfo;
 import androidx.camera.core.CameraSelector;
@@ -22,6 +22,8 @@ import androidx.camera.core.MeteringPointFactory;
 import androidx.camera.core.Preview;
 import androidx.camera.core.SurfaceOrientedMeteringPointFactory;
 import androidx.camera.core.ZoomState;
+import androidx.camera.extensions.ExtensionMode;
+import androidx.camera.extensions.ExtensionsManager;
 import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.core.content.ContextCompat;
 import androidx.lifecycle.LifecycleOwner;
@@ -37,10 +39,12 @@ import org.telegram.ui.LaunchActivity;
 
 import java.io.File;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 
 /**
  * CameraXSession handles modern camera streaming and high-resolution photo capture using
- * AndroidX CameraX. Supports multi-lens selection, HDR/quality optimization, and front-camera screen flash.
+ * AndroidX CameraX. Supports multi-lens selection, HDR extensions, optical zoom, AF/AE lock,
+ * and front-camera ring flash.
  */
 public class CameraXSession {
 
@@ -48,11 +52,16 @@ public class CameraXSession {
     public static final String FLASH_MODE_ON = "on";
     public static final String FLASH_MODE_AUTO = "auto";
 
+    public interface ResolutionListener {
+        void onResolutionReady(int width, int height);
+    }
+
     private final boolean isFront;
-    private final int viewWidth;
-    private final int viewHeight;
+    private int viewWidth;
+    private int viewHeight;
 
     private ProcessCameraProvider cameraProvider;
+    private ExtensionsManager extensionsManager;
     private androidx.camera.core.Camera activeCamera;
     private Preview previewUseCase;
     private ImageCapture imageCaptureUseCase;
@@ -62,23 +71,40 @@ public class CameraXSession {
     private boolean isInitiated = false;
     private String currentFlashMode = FLASH_MODE_OFF;
 
-    private int currentLens = EnhancedCameraSettings.LENS_REAR_WIDE;
-    private float currentZoomRatio = 1.0f;
-    private float minZoomRatio = 1.0f;
-    private float maxZoomRatio = 1.0f;
+    private int actualPreviewWidth = 1920;
+    private int actualPreviewHeight = 1080;
+    private ResolutionListener resolutionListener;
 
-    private int currentOrientation = 0;
-    private int displayOrientation = 0;
+    private float currentZoomRatio = 1.0f;
+    private float minZoomRatio = 0.6f;
+    private float maxZoomRatio = 10.0f;
+
+    private boolean isAeAfLocked = false;
+    private boolean isHdrEnabled = false;
+    private boolean isHdrSupported = false;
+
+    private ViewGroup cameraContainer;
+    private Runnable onReadyCallback;
 
     public CameraXSession(boolean isFront, int viewWidth, int viewHeight) {
         this.isFront = isFront;
         this.viewWidth = viewWidth;
         this.viewHeight = viewHeight;
-        this.currentLens = isFront ? EnhancedCameraSettings.LENS_FRONT : EnhancedCameraSettings.getSelectedLens();
     }
 
     public static CameraXSession create(boolean front, int viewWidth, int viewHeight) {
         return new CameraXSession(front, viewWidth, viewHeight);
+    }
+
+    public void setCameraContainer(ViewGroup container) {
+        this.cameraContainer = container;
+    }
+
+    public void setResolutionListener(ResolutionListener listener) {
+        this.resolutionListener = listener;
+        if (isInitiated && actualPreviewWidth > 0 && actualPreviewHeight > 0 && listener != null) {
+            listener.onResolutionReady(actualPreviewWidth, actualPreviewHeight);
+        }
     }
 
     public boolean isInitiated() {
@@ -90,23 +116,50 @@ public class CameraXSession {
     }
 
     public int getPreviewWidth() {
-        return viewWidth > 0 ? viewWidth : 1280;
+        return actualPreviewWidth;
     }
 
     public int getPreviewHeight() {
-        return viewHeight > 0 ? viewHeight : 720;
+        return actualPreviewHeight;
     }
 
     public int getWorldAngle() {
         return 0;
     }
 
-    public int getCurrentOrientation() {
-        return currentOrientation;
+    public int getDisplayOrientation() {
+        return 0;
     }
 
-    public int getDisplayOrientation() {
-        return displayOrientation;
+    public int getCurrentOrientation() {
+        return 0;
+    }
+
+    public float getMinZoomRatio() {
+        return minZoomRatio;
+    }
+
+    public float getMaxZoomRatio() {
+        return maxZoomRatio;
+    }
+
+    public float getCurrentZoomRatio() {
+        return currentZoomRatio;
+    }
+
+    public boolean isHdrSupported() {
+        return isHdrSupported;
+    }
+
+    public boolean isAeAfLocked() {
+        return isAeAfLocked;
+    }
+
+    public void updateViewDimensions(int width, int height) {
+        if (width > 0 && height > 0) {
+            this.viewWidth = width;
+            this.viewHeight = height;
+        }
     }
 
     /**
@@ -114,17 +167,43 @@ public class CameraXSession {
      */
     public void open(final SurfaceTexture surfaceTexture, final Runnable onReady) {
         this.surfaceTexture = surfaceTexture;
+        this.onReadyCallback = onReady;
         final Context context = ApplicationLoader.applicationContext;
         final ListenableFuture<ProcessCameraProvider> cameraProviderFuture = ProcessCameraProvider.getInstance(context);
 
         cameraProviderFuture.addListener(() -> {
             try {
                 cameraProvider = cameraProviderFuture.get();
-                bindCameraUseCases(onReady);
+
+                // Initialize ExtensionsManager for HDR / Night support
+                ListenableFuture<ExtensionsManager> extensionsManagerFuture = ExtensionsManager.getInstanceAsync(context, cameraProvider);
+                extensionsManagerFuture.addListener(() -> {
+                    try {
+                        extensionsManager = extensionsManagerFuture.get();
+                        checkExtensionsSupport();
+                    } catch (Exception ignore) {}
+                    bindCameraUseCases(onReadyCallback);
+                }, ContextCompat.getMainExecutor(context));
+
             } catch (ExecutionException | InterruptedException e) {
                 FileLog.e("CameraXSession init failed", e);
             }
         }, ContextCompat.getMainExecutor(context));
+    }
+
+    private void checkExtensionsSupport() {
+        if (extensionsManager == null || isFront) {
+            isHdrSupported = false;
+            return;
+        }
+        CameraSelector baseSelector = CameraSelector.DEFAULT_BACK_CAMERA;
+        isHdrSupported = extensionsManager.isExtensionAvailable(baseSelector, ExtensionMode.HDR);
+    }
+
+    public void toggleHdrMode(boolean enable) {
+        if (isHdrEnabled == enable) return;
+        this.isHdrEnabled = enable && isHdrSupported;
+        bindCameraUseCases(onReadyCallback);
     }
 
     private void bindCameraUseCases(final Runnable onReady) {
@@ -139,17 +218,24 @@ public class CameraXSession {
 
         cameraProvider.unbindAll();
 
-        // 1. Configure CameraSelector based on lens
-        CameraSelector.Builder selectorBuilder = new CameraSelector.Builder();
-        if (isFront) {
-            selectorBuilder.requireLensFacing(CameraSelector.LENS_FACING_FRONT);
-        } else {
-            selectorBuilder.requireLensFacing(CameraSelector.LENS_FACING_BACK);
+        // 1. Configure CameraSelector
+        CameraSelector cameraSelector = isFront ? CameraSelector.DEFAULT_FRONT_CAMERA : CameraSelector.DEFAULT_BACK_CAMERA;
+        if (isHdrEnabled && extensionsManager != null && extensionsManager.isExtensionAvailable(cameraSelector, ExtensionMode.HDR)) {
+            cameraSelector = extensionsManager.getExtensionEnabledCameraSelector(cameraSelector, ExtensionMode.HDR);
         }
-        CameraSelector cameraSelector = selectorBuilder.build();
 
-        // 2. Configure Preview
+        // 2. Compute matching aspect ratio to prevent stretching
+        int targetAspectRatio = AspectRatio.RATIO_4_3;
+        if (viewWidth > 0 && viewHeight > 0) {
+            float ratio = (float) Math.max(viewWidth, viewHeight) / (float) Math.min(viewWidth, viewHeight);
+            if (Math.abs(ratio - (16.0f / 9.0f)) < Math.abs(ratio - (4.0f / 3.0f))) {
+                targetAspectRatio = AspectRatio.RATIO_16_9;
+            }
+        }
+
+        // 3. Configure Preview
         previewUseCase = new Preview.Builder()
+                .setTargetAspectRatio(targetAspectRatio)
                 .build();
 
         previewUseCase.setSurfaceProvider(ContextCompat.getMainExecutor(context), request -> {
@@ -157,7 +243,15 @@ public class CameraXSession {
                 request.willNotProvideSurface();
                 return;
             }
-            surfaceTexture.setDefaultBufferSize(request.getResolution().getWidth(), request.getResolution().getHeight());
+            Size resolution = request.getResolution();
+            actualPreviewWidth = resolution.getWidth();
+            actualPreviewHeight = resolution.getHeight();
+            surfaceTexture.setDefaultBufferSize(actualPreviewWidth, actualPreviewHeight);
+
+            if (resolutionListener != null) {
+                AndroidUtilities.runOnUIThread(() -> resolutionListener.onResolutionReady(actualPreviewWidth, actualPreviewHeight));
+            }
+
             activeSurface = new Surface(surfaceTexture);
             request.provideSurface(activeSurface, ContextCompat.getMainExecutor(context), result -> {
                 if (activeSurface != null) {
@@ -167,8 +261,9 @@ public class CameraXSession {
             });
         });
 
-        // 3. Configure ImageCapture with MAXIMUM quality for crystal clear images
+        // 4. Configure ImageCapture with MAXIMUM quality
         ImageCapture.Builder captureBuilder = new ImageCapture.Builder()
+                .setTargetAspectRatio(targetAspectRatio)
                 .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
                 .setJpegQuality(100);
 
@@ -183,17 +278,13 @@ public class CameraXSession {
                     imageCaptureUseCase
             );
 
-            // Fetch zoom capabilities
+            // Read zoom capabilities from active camera
             if (activeCamera != null && activeCamera.getCameraInfo() != null) {
                 ZoomState zoomState = activeCamera.getCameraInfo().getZoomState().getValue();
                 if (zoomState != null) {
                     minZoomRatio = zoomState.getMinZoomRatio();
                     maxZoomRatio = zoomState.getMaxZoomRatio();
-                }
-
-                // If user selected ultrawide lens and camera supports zoom < 1.0f
-                if (currentLens == EnhancedCameraSettings.LENS_REAR_ULTRAWIDE && minZoomRatio < 1.0f) {
-                    activeCamera.getCameraControl().setZoomRatio(minZoomRatio);
+                    currentZoomRatio = zoomState.getZoomRatio();
                 }
             }
 
@@ -217,22 +308,83 @@ public class CameraXSession {
     }
 
     /**
-     * Captures a high-resolution photo with zero degradation.
-     * Triggers UI screen flash when capturing with the front camera.
+     * Tap to focus and meter, or long-press to lock AE/AF.
+     */
+    public void focusAndMeter(float x, float y, int viewW, int viewH, boolean lock) {
+        if (activeCamera == null) return;
+        try {
+            int w = viewW > 0 ? viewW : (viewWidth > 0 ? viewWidth : 1080);
+            int h = viewH > 0 ? viewH : (viewHeight > 0 ? viewHeight : 1920);
+            MeteringPointFactory factory = new SurfaceOrientedMeteringPointFactory(w, h);
+            MeteringPoint point = factory.createPoint(x, y);
+
+            FocusMeteringAction.Builder builder = new FocusMeteringAction.Builder(
+                    point,
+                    FocusMeteringAction.FLAG_AF | FocusMeteringAction.FLAG_AE
+            );
+
+            if (lock) {
+                builder.disableAutoCancel(); // Lock focus and exposure indefinitely!
+                isAeAfLocked = true;
+            } else {
+                builder.setAutoCancelDuration(3, TimeUnit.SECONDS);
+                isAeAfLocked = false;
+            }
+
+            activeCamera.getCameraControl().startFocusAndMetering(builder.build());
+        } catch (Exception e) {
+            FileLog.e("CameraXSession focusAndMeter error", e);
+        }
+    }
+
+    public void cancelFocusAndMetering() {
+        if (activeCamera != null) {
+            try {
+                activeCamera.getCameraControl().cancelFocusAndMetering();
+            } catch (Exception ignore) {}
+        }
+        isAeAfLocked = false;
+    }
+
+    public void focusToRect(Rect focusRect, Rect meteringRect) {
+        if (focusRect != null) {
+            focusAndMeter(focusRect.centerX(), focusRect.centerY(), viewWidth, viewHeight, false);
+        }
+    }
+
+    /**
+     * Set zoom ratio directly (e.g. 0.6x, 1.0x, 3.0x).
+     */
+    public void setZoomRatio(float ratio) {
+        if (activeCamera == null) return;
+        try {
+            currentZoomRatio = Math.max(minZoomRatio, Math.min(ratio, maxZoomRatio));
+            activeCamera.getCameraControl().setZoomRatio(currentZoomRatio);
+        } catch (Exception e) {
+            FileLog.e("CameraXSession setZoomRatio error", e);
+        }
+    }
+
+    public void setZoom(float zoomRatioNormalized) {
+        float targetZoom = minZoomRatio + (maxZoomRatio - minZoomRatio) * zoomRatioNormalized;
+        setZoomRatio(targetZoom);
+    }
+
+    /**
+     * Captures photo. Triggers ring flash if capturing with front camera and flash enabled.
      */
     public boolean takePicture(final File outputFile, final Utilities.Callback<Integer> callback) {
         if (imageCaptureUseCase == null || activeCamera == null) {
             return false;
         }
 
-        // Handle front camera software flash
         boolean needScreenFlash = isFront && EnhancedCameraSettings.isFrontScreenFlashEnabled()
                 && (FLASH_MODE_ON.equals(currentFlashMode) || FLASH_MODE_AUTO.equals(currentFlashMode));
 
         Activity currentActivity = LaunchActivity.instance;
 
         if (needScreenFlash && currentActivity != null) {
-            ScreenFlashHelper.illuminateScreen(currentActivity, () -> executeCapture(outputFile, callback, currentActivity));
+            ScreenFlashHelper.illuminateScreen(cameraContainer, currentActivity, () -> executeCapture(outputFile, callback, currentActivity));
         } else {
             executeCapture(outputFile, callback, null);
         }
@@ -253,7 +405,7 @@ public class CameraXSession {
                             ScreenFlashHelper.dismissScreen(activityToDismissFlash);
                         }
                         if (callback != null) {
-                            AndroidUtilities.runOnUIThread(() -> callback.run(currentOrientation));
+                            AndroidUtilities.runOnUIThread(() -> callback.run(0));
                         }
                     }
 
@@ -269,33 +421,6 @@ public class CameraXSession {
                     }
                 }
         );
-    }
-
-    public void setZoom(float zoomRatioNormalized) {
-        if (activeCamera == null) return;
-        CameraControl control = activeCamera.getCameraControl();
-        if (control != null) {
-            float targetZoom = minZoomRatio + (maxZoomRatio - minZoomRatio) * zoomRatioNormalized;
-            currentZoomRatio = Math.max(minZoomRatio, Math.min(targetZoom, maxZoomRatio));
-            control.setZoomRatio(currentZoomRatio);
-        }
-    }
-
-    public void switchLens(int targetLens) {
-        this.currentLens = targetLens;
-        EnhancedCameraSettings.setSelectedLens(targetLens);
-        if (activeCamera != null) {
-            CameraControl control = activeCamera.getCameraControl();
-            if (control != null) {
-                if (targetLens == EnhancedCameraSettings.LENS_REAR_ULTRAWIDE && minZoomRatio < 1.0f) {
-                    control.setZoomRatio(minZoomRatio); // e.g. 0.5x or 0.6x
-                } else if (targetLens == EnhancedCameraSettings.LENS_REAR_TELEPHOTO && maxZoomRatio >= 2.0f) {
-                    control.setZoomRatio(Math.min(2.0f, maxZoomRatio)); // 2x telephoto
-                } else {
-                    control.setZoomRatio(1.0f); // 1x standard wide
-                }
-            }
-        }
     }
 
     public void setCurrentFlashMode(String flashMode) {
@@ -327,18 +452,6 @@ public class CameraXSession {
 
     public boolean hasFlashModes() {
         return true;
-    }
-
-    public void focusToRect(Rect focusRect, Rect meteringRect) {
-        if (activeCamera == null || viewWidth <= 0 || viewHeight <= 0) return;
-        try {
-            MeteringPointFactory factory = new SurfaceOrientedMeteringPointFactory(viewWidth, viewHeight);
-            MeteringPoint point = factory.createPoint(focusRect.centerX(), focusRect.centerY());
-            FocusMeteringAction action = new FocusMeteringAction.Builder(point).build();
-            activeCamera.getCameraControl().startFocusAndMetering(action);
-        } catch (Exception e) {
-            FileLog.e("CameraXSession focusToRect error", e);
-        }
     }
 
     public void destroy(boolean async, Runnable before, Runnable after) {

@@ -129,6 +129,9 @@ public class CameraView extends FrameLayout implements TextureView.SurfaceTextur
     private final CameraSessionWrapper[] cameraSession = new CameraSessionWrapper[2];
     private CameraSessionWrapper cameraSessionRecording;
     private xyz.deep.nagram.camera.CameraLensSwitcherWidget lensSwitcherWidget;
+    private xyz.deep.nagram.camera.CameraZoomSliderWidget zoomSliderWidget;
+    private xyz.deep.nagram.camera.AeAfLockBadgeView aeAfLockBadgeView;
+    private boolean isMiniMode = false;
 
     private boolean useMaxPreview;
 
@@ -535,6 +538,7 @@ public class CameraView extends FrameLayout implements TextureView.SurfaceTextur
         pixelDualW = getMeasuredWidth();
         pixelDualH = getMeasuredHeight();
 //        }
+        updateOverlaysVisibility();
     }
 
     public float getTextureHeight(float width, float height) {
@@ -558,6 +562,7 @@ public class CameraView extends FrameLayout implements TextureView.SurfaceTextur
     protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
         super.onLayout(changed, left, top, right, bottom);
         checkPreviewMatrix();
+        updateOverlaysVisibility();
     }
 
     public void setMirror(boolean value) {
@@ -883,6 +888,24 @@ public class CameraView extends FrameLayout implements TextureView.SurfaceTextur
         clipBottom = value;
     }
 
+    public void setMiniMode(boolean mini) {
+        this.isMiniMode = mini;
+        updateOverlaysVisibility();
+    }
+
+    public void updateOverlaysVisibility() {
+        boolean isFull = !isMiniMode && getMeasuredWidth() > AndroidUtilities.dp(240) && getMeasuredHeight() > AndroidUtilities.dp(320);
+        if (lensSwitcherWidget != null) {
+            lensSwitcherWidget.setVisibility(isFull && !isFrontface && !dual ? View.VISIBLE : View.GONE);
+        }
+        if (zoomSliderWidget != null) {
+            zoomSliderWidget.setVisibility(isFull && !isFrontface && !dual ? View.VISIBLE : View.GONE);
+        }
+        if (aeAfLockBadgeView != null && (!isFull || isMiniMode)) {
+            aeAfLockBadgeView.setVisibility(View.GONE);
+        }
+    }
+
     private final Runnable updateRotationMatrix = () -> {
         final CameraGLThread cameraThread = this.cameraThread;
         if (cameraThread != null) {
@@ -969,6 +992,33 @@ public class CameraView extends FrameLayout implements TextureView.SurfaceTextur
 
     public void focusToPoint(int x, int y) {
         focusToPoint(x, y, true);
+        if (cameraSession[0] != null && cameraSession[0].getObject() instanceof xyz.deep.nagram.camera.CameraXSession) {
+            xyz.deep.nagram.camera.CameraXSession xSession = (xyz.deep.nagram.camera.CameraXSession) cameraSession[0].getObject();
+            xSession.focusAndMeter(x, y, getWidth(), getHeight(), false);
+            if (aeAfLockBadgeView != null) {
+                aeAfLockBadgeView.hideLock();
+            }
+        }
+    }
+
+    public void lockFocusAndExposure(int x, int y) {
+        if (cameraSession[0] != null && cameraSession[0].getObject() instanceof xyz.deep.nagram.camera.CameraXSession) {
+            xyz.deep.nagram.camera.CameraXSession xSession = (xyz.deep.nagram.camera.CameraXSession) cameraSession[0].getObject();
+            xSession.focusAndMeter(x, y, getWidth(), getHeight(), true);
+            if (aeAfLockBadgeView != null) {
+                aeAfLockBadgeView.showLock();
+            }
+            focusProgress = 0.0f;
+            innerAlpha = 1.0f;
+            outerAlpha = 1.0f;
+            cx = x;
+            cy = y;
+            lastDrawTime = System.currentTimeMillis();
+            invalidate();
+            try {
+                performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
+            } catch (Exception ignore) {}
+        }
     }
 
     public void setZoom(float value) {
@@ -2151,6 +2201,25 @@ public class CameraView extends FrameLayout implements TextureView.SurfaceTextur
             FileLog.d("CameraView camera scaleX = " + scaleX + " scaleY = " + scaleY);
         }
 
+        public void recomputeScale(int surfaceIndex) {
+            postRunnable(() -> {
+                updateScale(surfaceIndex);
+                float tX = 1.0f / scaleX / 2.0f;
+                float tY = 1.0f / scaleY / 2.0f;
+                float[] texData = {
+                    0.5f - tX, 0.5f - tY,
+                    0.5f + tX, 0.5f - tY,
+                    0.5f - tX, 0.5f + tY,
+                    0.5f + tX, 0.5f + tY
+                };
+                if (textureBuffer != null) {
+                    textureBuffer.clear();
+                    textureBuffer.put(texData).position(0);
+                }
+                requestRender(true, false);
+            });
+        }
+
         private void applyDualMatrix(Matrix matrix) {
             getValues(matrix, cameraMatrix[1]);
         }
@@ -2298,15 +2367,38 @@ public class CameraView extends FrameLayout implements TextureView.SurfaceTextur
 
             if (xyz.deep.nagram.camera.EnhancedCameraSettings.isEnhancedCameraEnabled() && !dual) {
                 xyz.deep.nagram.camera.CameraXSession session = xyz.deep.nagram.camera.CameraXSession.create(i == 0 ? isFrontface : !isFrontface, surfaceWidth, surfaceHeight);
+                session.setCameraContainer(this);
                 cameraSession[i] = CameraSessionWrapper.of(session);
                 previewSize[i] = new Size(session.getPreviewWidth(), session.getPreviewHeight());
                 cameraThread.setCurrentSession(cameraSession[i], i);
+                session.setResolutionListener((actualW, actualH) -> {
+                    previewSize[0] = new Size(actualW, actualH);
+                    checkPreviewMatrix();
+                    if (cameraThread != null) {
+                        cameraThread.recomputeScale(0);
+                    }
+                    requestLayout();
+                });
                 if (lensSwitcherWidget == null && i == 0 && !isFrontface) {
                     lensSwitcherWidget = xyz.deep.nagram.camera.CameraLensSwitcherWidget.attachTo(this);
                 }
+                if (zoomSliderWidget == null && i == 0 && !isFrontface) {
+                    zoomSliderWidget = xyz.deep.nagram.camera.CameraZoomSliderWidget.attachTo(this);
+                }
+                if (aeAfLockBadgeView == null && i == 0) {
+                    aeAfLockBadgeView = xyz.deep.nagram.camera.AeAfLockBadgeView.attachTo(this);
+                }
                 if (lensSwitcherWidget != null) {
                     lensSwitcherWidget.setCameraXSession(session);
+                    if (zoomSliderWidget != null) {
+                        lensSwitcherWidget.setZoomSliderWidget(zoomSliderWidget);
+                        zoomSliderWidget.setLensSwitcherWidget(lensSwitcherWidget);
+                    }
                 }
+                if (zoomSliderWidget != null) {
+                    zoomSliderWidget.setCameraXSession(session);
+                }
+                updateOverlaysVisibility();
                 session.open(surfaceTexture, () -> {
                     requestLayout();
                 });
