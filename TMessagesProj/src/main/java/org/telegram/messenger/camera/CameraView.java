@@ -894,14 +894,14 @@ public class CameraView extends FrameLayout implements TextureView.SurfaceTextur
     }
 
     public void updateOverlaysVisibility() {
-        boolean isFull = !isMiniMode && getMeasuredWidth() > AndroidUtilities.dp(240) && getMeasuredHeight() > AndroidUtilities.dp(320);
+        boolean isFull = !isMiniMode;
         if (lensSwitcherWidget != null) {
             lensSwitcherWidget.setVisibility(isFull && !isFrontface && !dual ? View.VISIBLE : View.GONE);
         }
         if (zoomSliderWidget != null) {
             zoomSliderWidget.setVisibility(isFull && !isFrontface && !dual ? View.VISIBLE : View.GONE);
         }
-        if (aeAfLockBadgeView != null && (!isFull || isMiniMode)) {
+        if (aeAfLockBadgeView != null && !isFull) {
             aeAfLockBadgeView.setVisibility(View.GONE);
         }
     }
@@ -912,6 +912,9 @@ public class CameraView extends FrameLayout implements TextureView.SurfaceTextur
             for (int i = 0; i < 2; ++i) {
                 if (cameraThread.currentSession[i] != null) {
                     int rotationAngle = cameraThread.currentSession[i].getWorldAngle();
+                    if (cameraThread.currentSession[i].getObject() instanceof xyz.deep.nagram.camera.CameraXSession) {
+                        rotationAngle = 0;
+                    }
                     android.opengl.Matrix.setIdentityM(mMVPMatrix[i], 0);
                     if (rotationAngle != 0) {
                         android.opengl.Matrix.rotateM(mMVPMatrix[i], 0, rotationAngle, 0, 0, 1);
@@ -2056,6 +2059,9 @@ public class CameraView extends FrameLayout implements TextureView.SurfaceTextur
                     }
 //                    currentSession[i].updateRotation();
                     int rotationAngle = currentSession[i].getWorldAngle();
+                    if (currentSession[i] != null && currentSession[i].getObject() instanceof xyz.deep.nagram.camera.CameraXSession) {
+                        rotationAngle = 0;
+                    }
                     if (BuildVars.LOGS_ENABLED) {
                         FileLog.d("CameraView " + "set gl renderer session " + i + " angle=" + rotationAngle);
                     }

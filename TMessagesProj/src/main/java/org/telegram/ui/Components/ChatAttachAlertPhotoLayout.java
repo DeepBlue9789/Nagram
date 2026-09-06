@@ -2387,6 +2387,13 @@ public class ChatAttachAlertPhotoLayout extends ChatAttachAlert.AttachAlertLayou
     }
 
     private void showZoomControls(boolean show, boolean animated) {
+        if (xyz.deep.nagram.camera.EnhancedCameraSettings.isEnhancedCameraEnabled()) {
+            if (zoomControlView != null) {
+                zoomControlView.setVisibility(View.GONE);
+                zoomControlView.setTag(null);
+            }
+            return;
+        }
         if (zoomControlView.getTag() != null && show || zoomControlView.getTag() == null && !show) {
             if (show) {
                 if (zoomControlHideRunnable != null) {
@@ -2580,8 +2587,13 @@ public class ChatAttachAlertPhotoLayout extends ChatAttachAlert.AttachAlertLayou
         if (parentAlert.getCommentView().isKeyboardVisible() && isFocusable()) {
             parentAlert.getCommentView().closeKeyboard();
         }
-        zoomControlView.setVisibility(View.VISIBLE);
-        zoomControlView.setAlpha(0.0f);
+        if (!xyz.deep.nagram.camera.EnhancedCameraSettings.isEnhancedCameraEnabled()) {
+            zoomControlView.setVisibility(View.VISIBLE);
+            zoomControlView.setAlpha(0.0f);
+        } else {
+            zoomControlView.setVisibility(View.GONE);
+            zoomControlView.setAlpha(0.0f);
+        }
         cameraPanel.setVisibility(View.VISIBLE);
         cameraPanel.setTag(null);
         animateCameraValues[0] = 0;
@@ -2623,6 +2635,8 @@ public class ChatAttachAlertPhotoLayout extends ChatAttachAlert.AttachAlertLayou
                     notificationsLocker.unlock();
                     cameraAnimationInProgress = false;
                     if (cameraView != null) {
+                        cameraView.setMiniMode(false);
+                        cameraView.updateOverlaysVisibility();
                         cameraView.invalidateOutline();
                         cameraView.invalidate();
                     }
