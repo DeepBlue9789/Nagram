@@ -66,6 +66,7 @@ jobs:
           git merge -X ours "$TAG" -m "chore(sync): merge upstream release $TAG" || {
             echo "Merge had conflicts; resolving with checkout of our files..."
             git checkout --ours TMessagesProj/build.gradle
+            git checkout --ours TMessagesProj/google-services.json
             git checkout --ours TMessagesProj/src/main/java/org/telegram/messenger/BuildVars.java
             git checkout --ours TMessagesProj/src/main/java/org/telegram/messenger/camera/CameraSessionWrapper.java
             git checkout --ours TMessagesProj/src/main/java/org/telegram/messenger/camera/CameraController.java
@@ -73,6 +74,11 @@ jobs:
             git add -A
             git commit -m "chore(sync): resolve merge with upstream $TAG"
           }
+
+      - name: Checkout Submodules
+        if: steps.check_release.outputs.should_release == 'true'
+        run: |
+          git submodule update --init 'TMessagesProj/lib/*' || true
 
       - name: Set up JDK 17
         if: steps.check_release.outputs.should_release == 'true'
@@ -91,6 +97,12 @@ jobs:
           echo "y" | sdkmanager --install "ndk;27.2.12479018" --sdk_root=${ANDROID_SDK_ROOT} &> /dev/null
           echo "sdk.dir=${ANDROID_HOME}" > local.properties
           echo "ndk.dir=${ANDROID_HOME}/ndk/27.2.12479018" >> local.properties
+
+      - name: Configure Gradle
+        if: steps.check_release.outputs.should_release == 'true'
+        run: |
+          sed -i "s/2000000000000/$(date +%s%N | cut -c1-13)/g" gradle.properties
+          echo "sdk.dir=${ANDROID_HOME}" >> local.properties
 
       - name: Restore Permanent Keystore
         if: steps.check_release.outputs.should_release == 'true'
@@ -112,10 +124,11 @@ jobs:
       - name: Build Signed Release APK
         if: steps.check_release.outputs.should_release == 'true'
         run: |
+          export LOCAL_PROPERTIES="${{ secrets.LOCAL_PROPERTIES }}"
           export KEYSTORE_PASS="${{ secrets.KEYSTORE_PASSWORD }}"
           export ALIAS_NAME="${{ secrets.KEY_ALIAS }}"
           export ALIAS_PASS="${{ secrets.KEY_PASSWORD }}"
-          ./gradlew TMessagesProj:assembleRelease --no-daemon --build-cache
+          ./gradlew TMessagesProj:assembleRelease --no-daemon --build-cache --no-configuration-cache
 
       - name: Push Synced Main Branch
         if: steps.check_release.outputs.should_release == 'true'
