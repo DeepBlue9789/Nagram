@@ -26,7 +26,7 @@ public class EnhancedCameraSettings {
 
     public static boolean isEnhancedCameraEnabled() {
         try {
-            return xyz.nextalone.nagram.NaConfig.INSTANCE.getEnhancedCameraX().getBoolean();
+            return xyz.nextalone.nagram.NaConfig.INSTANCE.getEnhancedCameraX().Bool();
         } catch (Throwable ignore) {
             return getPrefs().getBoolean(KEY_CAMERAX_ENABLED, true);
         }
@@ -34,14 +34,14 @@ public class EnhancedCameraSettings {
 
     public static void setEnhancedCameraEnabled(boolean enabled) {
         try {
-            xyz.nextalone.nagram.NaConfig.INSTANCE.getEnhancedCameraX().setBoolean(enabled);
+            xyz.nextalone.nagram.NaConfig.INSTANCE.getEnhancedCameraX().setConfigBool(enabled);
         } catch (Throwable ignore) {}
         getPrefs().edit().putBoolean(KEY_CAMERAX_ENABLED, enabled).apply();
     }
 
     public static boolean isFrontScreenFlashEnabled() {
         try {
-            return xyz.nextalone.nagram.NaConfig.INSTANCE.getFrontScreenFlash().getBoolean();
+            return xyz.nextalone.nagram.NaConfig.INSTANCE.getFrontScreenFlash().Bool();
         } catch (Throwable ignore) {
             return getPrefs().getBoolean(KEY_FRONT_FLASH_ENABLED, true);
         }
@@ -49,7 +49,7 @@ public class EnhancedCameraSettings {
 
     public static void setFrontScreenFlashEnabled(boolean enabled) {
         try {
-            xyz.nextalone.nagram.NaConfig.INSTANCE.getFrontScreenFlash().setBoolean(enabled);
+            xyz.nextalone.nagram.NaConfig.INSTANCE.getFrontScreenFlash().setConfigBool(enabled);
         } catch (Throwable ignore) {}
         getPrefs().edit().putBoolean(KEY_FRONT_FLASH_ENABLED, enabled).apply();
     }
