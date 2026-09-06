@@ -164,20 +164,25 @@ public class CameraLensSwitcherWidget extends LinearLayout {
                 cameraXSession.toggleHdrMode(isHdrEnabled);
             }
         });
-        updateHdrButtonUI();
+        updateHdrButtonUI(tv);
         return tv;
     }
 
     private void updateHdrButtonUI() {
+        updateHdrButtonUI(btnHdr);
+    }
+
+    private void updateHdrButtonUI(TextView targetBtn) {
+        if (targetBtn == null) return;
         if (isHdrEnabled) {
             GradientDrawable activeBg = new GradientDrawable();
             activeBg.setCornerRadius(AndroidUtilities.dp(16));
             activeBg.setColor(Color.rgb(255, 215, 0)); // Gold
-            btnHdr.setBackground(activeBg);
-            btnHdr.setTextColor(Color.BLACK);
+            targetBtn.setBackground(activeBg);
+            targetBtn.setTextColor(Color.BLACK);
         } else {
-            btnHdr.setBackground(null);
-            btnHdr.setTextColor(Color.argb(160, 255, 255, 255));
+            targetBtn.setBackground(null);
+            targetBtn.setTextColor(Color.argb(160, 255, 255, 255));
         }
     }
 

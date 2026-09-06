@@ -124,7 +124,7 @@ public class CameraXSession {
     }
 
     public int getWorldAngle() {
-        return 0;
+        return isFront ? 270 : 90;
     }
 
     public int getDisplayOrientation() {
@@ -132,7 +132,7 @@ public class CameraXSession {
     }
 
     public int getCurrentOrientation() {
-        return 0;
+        return isFront ? 270 : 90;
     }
 
     public float getMinZoomRatio() {
@@ -174,16 +174,19 @@ public class CameraXSession {
         cameraProviderFuture.addListener(() -> {
             try {
                 cameraProvider = cameraProviderFuture.get();
+                // Bind immediately for instantaneous camera preview start
+                bindCameraUseCases(onReadyCallback);
 
-                // Initialize ExtensionsManager for HDR / Night support
-                ListenableFuture<ExtensionsManager> extensionsManagerFuture = ExtensionsManager.getInstanceAsync(context, cameraProvider);
-                extensionsManagerFuture.addListener(() -> {
-                    try {
-                        extensionsManager = extensionsManagerFuture.get();
-                        checkExtensionsSupport();
-                    } catch (Exception ignore) {}
-                    bindCameraUseCases(onReadyCallback);
-                }, ContextCompat.getMainExecutor(context));
+                // Initialize ExtensionsManager in background for HDR/Night query without blocking preview
+                try {
+                    ListenableFuture<ExtensionsManager> extensionsManagerFuture = ExtensionsManager.getInstanceAsync(context, cameraProvider);
+                    extensionsManagerFuture.addListener(() -> {
+                        try {
+                            extensionsManager = extensionsManagerFuture.get();
+                            checkExtensionsSupport();
+                        } catch (Exception ignore) {}
+                    }, ContextCompat.getMainExecutor(context));
+                } catch (Throwable ignore) {}
 
             } catch (ExecutionException | InterruptedException e) {
                 FileLog.e("CameraXSession init failed", e);

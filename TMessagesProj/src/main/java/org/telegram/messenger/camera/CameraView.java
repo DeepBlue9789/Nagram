@@ -2372,7 +2372,9 @@ public class CameraView extends FrameLayout implements TextureView.SurfaceTextur
                 previewSize[i] = new Size(session.getPreviewWidth(), session.getPreviewHeight());
                 cameraThread.setCurrentSession(cameraSession[i], i);
                 session.setResolutionListener((actualW, actualH) -> {
-                    previewSize[0] = new Size(actualW, actualH);
+                    int pw = Math.max(actualW, actualH);
+                    int ph = Math.min(actualW, actualH);
+                    previewSize[0] = new Size(pw, ph);
                     checkPreviewMatrix();
                     if (cameraThread != null) {
                         cameraThread.recomputeScale(0);
