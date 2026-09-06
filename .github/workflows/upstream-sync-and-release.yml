@@ -117,6 +117,30 @@ jobs:
             fi
           fi
 
+      - name: Fetch Upstream Prebuilt Native Libraries
+        if: steps.check_release.outputs.should_release == 'true'
+        run: |
+          mkdir -p upstream_apks
+          echo "Downloading upstream release APKs for ${{ steps.check_release.outputs.release_tag }}..."
+          gh release download "${{ steps.check_release.outputs.release_tag }}" --repo NextAlone/Nagram --pattern "*arm64-v8a.apk" --pattern "*armeabi-v7a.apk" --dir upstream_apks || true
+          mkdir -p TMessagesProj/src/main/libs
+          mkdir -p extracted_libs
+          for apk in upstream_apks/*.apk; do
+            if [ -f "$apk" ]; then
+              echo "Extracting native libraries from $apk..."
+              unzip -o "$apk" "lib/*" -d extracted_libs/
+            fi
+          done
+          if [ -d "extracted_libs/lib" ]; then
+            cp -r extracted_libs/lib/* TMessagesProj/src/main/libs/
+            echo "Extracted libraries in TMessagesProj/src/main/libs:"
+            ls -la TMessagesProj/src/main/libs/
+            echo "Patching signature verification inside prebuilt native libraries..."
+            python scripts/patch_so_signature.py
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Setup Gradle
         if: steps.check_release.outputs.should_release == 'true'
         uses: gradle/actions/setup-gradle@v4
